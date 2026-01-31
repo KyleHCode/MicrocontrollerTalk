@@ -1,3 +1,7 @@
+// Add in decode for LoRA recieving side
+// LoRA will send in a hex code to convert to relay states
+// Add in LoRA config setup later
+
 #include <Arduino.h>
 #define RX_PIN 44  // GPIO44 D7 (RX on XIAO)
 #define TX_PIN 43  // GPIO43 D6 (TX on XIAO)
@@ -31,10 +35,15 @@ void setup() {
 
 void loop() {
   // Wait for new data to arrive
-  if (Serial1.available() >= 2) {
-    uint16_t recievedBytes;
-    Serial1.readBytes((uint8_t*)&recievedBytes, sizeof(recievedBytes));
-    Serial.println("Received: " + String(recievedBytes, BIN));
+  if (Serial1.available()) {
+    String hexString = Serial1.readStringUntil('\n');
+    Serial.print("Received raw data: ");
+    Serial.println(hexString);
+
+    hexString.trim();  // Remove whitespace/newline
+    uint16_t recievedBytes = (uint16_t)strtol(hexString.c_str(), NULL, 16);
+    Serial.println("Received hex: " + hexString);
+    Serial.println("Converted to binary: " + String(recievedBytes, BIN));
     
     // if MSB == 1, process the received relay state
     if (recievedBytes & 0x8000) {
@@ -59,4 +68,19 @@ void setRelays(uint16_t state) {
         digitalWrite(relayPins[i], on ? HIGH : LOW);
         Serial.println("Setting relay " + String(i+1) + " to " + String(on ? "ON" : "OFF"));
     }
+}
+
+String stringToHex(String text) {
+    String hex = "";
+    for(int i = 0; i < text.length(); i++) {
+        char buf[3];
+        sprintf(buf, "%02X", text[i]);
+        hex += buf;
+    }
+    return hex;
+}
+
+uint16_t hexToUint16(String hexString) {
+    hexString.trim();
+    return (uint16_t)strtol(hexString.c_str(), NULL, 16);
 }
