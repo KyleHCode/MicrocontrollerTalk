@@ -9,6 +9,8 @@
 #define RELAY5 5
 #define RELAY6 6
 
+const uint8_t BIT_START = 9;  // Start bit for relays in the 16-bit value
+
 // Array of relay pins - using GPIO numbers that correspond to D0-D5 on XIAO
 const uint8_t relayPins[6] = {RELAY1, RELAY2, RELAY3, RELAY4, RELAY5, RELAY6};  // D0, D1, D2, D3, D4, D5
 // Function Prototypes
@@ -53,7 +55,7 @@ void loop() {
 // write all relays at once from a 6-bit value
 void setRelays(uint16_t state) {
     for (uint8_t i = 0; i < 6; ++i) {
-        bool on = state & (1u << (i + 9));  // check bits 9-14 for relays
+        bool on = state & (1u << (i + BIT_START));  // check bits 9-14 for relays
         digitalWrite(relayPins[i], on ? HIGH : LOW);
         Serial.println("Setting relay " + String(i+1) + " to " + String(on ? "ON" : "OFF"));
     }
