@@ -2,11 +2,19 @@
 // Receives hex relay commands from LoRa and controls relays
 
 #include <Arduino.h>
+#include <SPI.h>
 #include "lora_config.h"
 #include "LoRaModule.h"
 
 #define RX_PIN 44  // GPIO44 D7 (RX on XIAO) - connects to LoRa TX
 #define TX_PIN 43  // GPIO43 D6 (TX on XIAO) - connects to LoRa RX
+
+// MCU-to-MCU SPI pins (this MCU is master)
+#define MCU_SCK_PIN 8   // D8 SCK
+#define MCU_MISO_PIN 9  // D9 MISO
+#define MCU_MOSI_PIN 10 // D10 MOSI
+#define MCU_SS_PIN 0    // D0 SS/CS
+#define MCU_SPI_HZ 1000000
 
 #define RELAY1 1
 #define RELAY2 2
@@ -30,6 +38,12 @@ void setup() {
   
   Serial.println("STARTING RECEIVER...");
   Serial.flush();
+  
+  // Initialize SPI for MCU communication
+  SPI.begin(MCU_SCK_PIN, MCU_MISO_PIN, MCU_MOSI_PIN, MCU_SS_PIN);
+  pinMode(MCU_SS_PIN, OUTPUT);
+  digitalWrite(MCU_SS_PIN, HIGH);
+  Serial.println("✓ MCU SPI communication initialized");
   
   // Initialize relay pins as outputs
   for (uint8_t i = 0; i < 6; i++) {
@@ -62,6 +76,16 @@ void loop() {
     uint16_t receivedBytes = (uint16_t)strtol(hexData.c_str(), NULL, 16);
     Serial.print("Binary: ");
     Serial.println(String(receivedBytes, BIN));
+    
+    // Send receivedBytes to another MCU over SPI
+    SPI.beginTransaction(SPISettings(MCU_SPI_HZ, MSBFIRST, SPI_MODE0));
+    digitalWrite(MCU_SS_PIN, LOW);
+    SPI.transfer((uint8_t)(receivedBytes >> 8));   // High byte
+    SPI.transfer((uint8_t)(receivedBytes & 0xFF)); // Low byte
+    digitalWrite(MCU_SS_PIN, HIGH);
+    SPI.endTransaction();
+    Serial.print("Forwarded to MCU over SPI: 0x");
+    Serial.println(receivedBytes, HEX);
     
     // Check MSB and process
     if (receivedBytes & RELAY_MSB_BIT) {

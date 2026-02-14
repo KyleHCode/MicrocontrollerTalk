@@ -15,7 +15,11 @@ public:
     bool receiveData(String& hexData);
     
 private:
+#if defined(__IMXRT1062__)
+    HardwareSerial& loraSerial = Serial1;
+#else
     HardwareSerial* loraSerial;
+#endif
     uint8_t _rxPin;
     uint8_t _txPin;
     uint8_t _address;

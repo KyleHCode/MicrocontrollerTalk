@@ -2,16 +2,24 @@
 
 LoRaModule::LoRaModule(uint8_t rxPin, uint8_t txPin, uint8_t address) 
     : _rxPin(rxPin), _txPin(txPin), _address(address) {
+#if defined(__IMXRT1062__)
+    // Teensy 4.x: use Serial1, ignore pins
+    // loraSerial is reference to Serial1
+#else
     loraSerial = new HardwareSerial(1);  // Use UART1
+#endif
 }
 
 bool LoRaModule::begin() {
+#if defined(__IMXRT1062__)
+    loraSerial.begin(115200);
+    delay(1000);
+    Serial.println("Initializing LoRa Module...");
+#else
     loraSerial->begin(115200, SERIAL_8N1, _rxPin, _txPin);
     delay(1000);
-    
     Serial.println("Initializing LoRa Module...");
-    
-    // Verify module is responding
+#endif
     if (sendATCommand("AT").indexOf("OK") != -1) {
         Serial.println("LoRa module responding");
         return true;
@@ -47,32 +55,35 @@ bool LoRaModule::configure(uint8_t address, unsigned long band, uint8_t networkI
 
 String LoRaModule::sendATCommand(const char* command, unsigned long timeout) {
     String result = "";
-    
-    Serial.print("Sending: ");
-    Serial.println(command);
-    
-    // Clear buffer
+#if defined(__IMXRT1062__)
+    while (loraSerial.available()) {
+        loraSerial.read();
+    }
+    loraSerial.println(command);
+#else
     while (loraSerial->available()) {
         loraSerial->read();
     }
-    
     loraSerial->println(command);
-    
+#endif
     unsigned long startTime = millis();
     unsigned long lastCharTime = millis();
     while (millis() - startTime < timeout) {
+#if defined(__IMXRT1062__)
+        if (loraSerial.available()) {
+            char c = loraSerial.read();
+#else
         if (loraSerial->available()) {
             char c = loraSerial->read();
+#endif
             result += c;
             lastCharTime = millis();
-            // Break if we got OK or ERROR and no data for 50ms
             if ((result.indexOf("OK") != -1 || result.indexOf("ERROR") != -1) && 
                 millis() - lastCharTime > 50) {
                 break;
             }
         }
     }
-    
     Serial.print("Response: ");
     Serial.println(result);
     return result;
@@ -86,18 +97,27 @@ bool LoRaModule::sendData(uint8_t destAddress, String hexData) {
 }
 
 bool LoRaModule::receiveData(String& hexData) {
+#if defined(__IMXRT1062__)
+    if (!loraSerial.available()) {
+        return false;
+    }
+#else
     if (!loraSerial->available()) {
         return false;
     }
-    
+#endif
     String incomingString = "";
-    
     // Read with timeout
     unsigned long startTime = millis();
     unsigned long lastCharTime = millis();
     while (millis() - startTime < 1000) {
+#if defined(__IMXRT1062__)
+        if (loraSerial.available()) {
+            char c = loraSerial.read();
+#else
         if (loraSerial->available()) {
             char c = loraSerial->read();
+#endif
             if (c == '\n') break;
             incomingString += c;
             lastCharTime = millis();
@@ -106,7 +126,6 @@ bool LoRaModule::receiveData(String& hexData) {
             break;
         }
     }
-    
     // Parse format: +RCV=<address>,<length>,<data>,<RSSI>,<SNR>
     int firstComma = incomingString.indexOf(',');
     int secondComma = incomingString.indexOf(',', firstComma + 1);
