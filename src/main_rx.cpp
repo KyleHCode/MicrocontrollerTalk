@@ -9,8 +9,8 @@
 #define RX_PIN 8  // GPIO44 D7 (RX on XIAO) - connects to LoRa TX
 #define TX_PIN 7  // GPIO43 D6 (TX on XIAO) - connects to LoRa RX
 
-// I2C address for the Teensy that receives the binary relay command (change if needed)
-#define TEENSY_I2C_ADDRESS 0x08
+// I2C address for this ESP when acting as a slave (change if needed)
+#define I2C_SLAVE_ADDR 0x09
 #define OPEN_ALL_VALVES 0xFE00  // binary 1111111000000000 (bits 15..9 = 1)
 #define RELAY1 1
 #define RELAY2 2
@@ -25,10 +25,14 @@ const uint8_t relayPins[6] = {RELAY1, RELAY2, RELAY3, RELAY4, RELAY5, RELAY6};
 // Create LoRa module instance
 LoRaModule lora(RX_PIN, TX_PIN, LORA_RECEIVER_ADDRESS);
 
+// I2C state (updated by master writes)
+volatile uint16_t lastI2CValue = RELAY_MSB_BIT; // MSB set by default so master reads are valid
+
 // Function Prototypes
 void setRelays(uint16_t state);
 bool parseHexToUint16(const String &hex, uint16_t &out); // parse hex string to uint16_t
-void sendToTeensy(uint16_t value);                       // send 16-bit value to Teensy over I2C
+void receiveEvent(int howMany);                          // I2C receive handler (Wire.onReceive)
+void requestEvent();                                     // I2C request handler (Wire.onRequest)
 
 void setup() {
   Serial.begin(115200);           // USB debug serial
@@ -37,14 +41,15 @@ void setup() {
   Serial.println("STARTING RECEIVER...");
   Serial.flush();
   
-  // Start I2C (Wire) as master
-  Wire.begin();
-  Serial.println("Wire (I2C) initialized");
+  // Start I2C (Wire) as slave
+  Wire.begin(I2C_SLAVE_ADDR);
+  Wire.onReceive(receiveEvent);
+  Wire.onRequest(requestEvent);
+  Serial.print("Wire (I2C) initialized as SLAVE @ 0x");
+  Serial.println(I2C_SLAVE_ADDR, HEX);
 
-  // Send initial two-byte value (MSB set = 0b1000000000000000 / 0x8000)
-  // so the Teensy I2C slave has a known startup state to pick up.
-  sendToTeensy(RELAY_MSB_BIT);
-  Serial.println("Initial I2C init value 0x8000 sent to Teensy");
+  // ensure local state has MSB validation bit set so masters reading this device see a valid state
+  lastI2CValue = RELAY_MSB_BIT;
   
   // Initialize relay pins as outputs
   for (uint8_t i = 0; i < 6; i++) {
@@ -88,8 +93,8 @@ void loop() {
       Serial.println("Command: OPEN ALL VALVES (0xFE00 / 1111111000000000)");
     }
 
-    // forward raw binary to Teensy over I2C (MSB first)
-    sendToTeensy(receivedBytes);
+    // update local I2C state so an I2C master can read the latest value
+    lastI2CValue = receivedBytes;
 
     // Only update relays when the MSB validation bit is set
     bool validCommand = (receivedBytes & RELAY_MSB_BIT);
@@ -128,22 +133,31 @@ bool parseHexToUint16(const String &hex, uint16_t &out) {
   return true;
 }
 
-// Send a 16-bit value to the Teensy over I2C (MSB first).
-void sendToTeensy(uint16_t value) {
-  uint8_t buf[2];
-  buf[0] = (uint8_t)(value >> 8);   // MSB
-  buf[1] = (uint8_t)(value & 0xFF); // LSB
-
-  Wire.beginTransmission(TEENSY_I2C_ADDRESS);
-  Wire.write(buf, 2);
-  uint8_t err = Wire.endTransmission();
-
-  Serial.print("I2C -> Teensy (0x");
-  Serial.print(TEENSY_I2C_ADDRESS, HEX);
-  Serial.print(") sent 0x");
-  Serial.println(value, HEX);
-  if (err != 0) {
-    Serial.print("I2C error code: ");
-    Serial.println(err);
+// I2C receive handler — called when an I2C master writes to this device
+void receiveEvent(int howMany) {
+  if (howMany < 2) {
+    // drain incomplete data
+    while (Wire.available()) Wire.read();
+    Serial.println("I2C receiveEvent: incomplete write (ignored)");
+    return;
   }
+  uint8_t high = Wire.read();
+  uint8_t low = Wire.read();
+  uint16_t value = (uint16_t(high) << 8) | low;
+  lastI2CValue = value;
+  Serial.print("I2C <- master wrote 0x");
+  Serial.println(value, HEX);
+  if (value & RELAY_MSB_BIT) {
+    setRelays(value);
+  } else {
+    Serial.println("MSB not set — write ignored for relay update");
+  }
+}
+
+// I2C request handler — called when an I2C master requests data from this slave
+void requestEvent() {
+  uint8_t high = (uint8_t)(lastI2CValue >> 8);
+  uint8_t low = (uint8_t)(lastI2CValue & 0xFF);
+  Wire.write(high);
+  Wire.write(low);
 }
