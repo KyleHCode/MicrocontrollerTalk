@@ -40,6 +40,11 @@ void setup() {
   // Start I2C (Wire) as master
   Wire.begin();
   Serial.println("Wire (I2C) initialized");
+
+  // Send initial two-byte value (MSB set = 0b1000000000000000 / 0x8000)
+  // so the Teensy I2C slave has a known startup state to pick up.
+  sendToTeensy(RELAY_MSB_BIT);
+  Serial.println("Initial I2C init value 0x8000 sent to Teensy");
   
   // Initialize relay pins as outputs
   for (uint8_t i = 0; i < 6; i++) {
