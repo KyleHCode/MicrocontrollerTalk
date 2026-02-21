@@ -16,8 +16,8 @@
 #define RELAY2 2
 #define RELAY3 3
 #define RELAY4 4
-#define RELAY5 6
-#define RELAY6 7
+#define RELAY5 43
+#define RELAY6 44
 
 // Array of relay pins - using GPIO numbers that correspond to D0-D5 on XIAO
 const uint8_t relayPins[6] = {RELAY1, RELAY2, RELAY3, RELAY4, RELAY5, RELAY6};
@@ -135,18 +135,33 @@ bool parseHexToUint16(const String &hex, uint16_t &out) {
 
 // I2C receive handler — called when an I2C master writes to this device
 void receiveEvent(int howMany) {
-  if (howMany < 2) {
-    // drain incomplete data
-    while (Wire.available()) Wire.read();
-    Serial.println("I2C receiveEvent: incomplete write (ignored)");
-    return;
+  // Expect exactly 2 bytes; anything else is unexpected and will be logged/drained.
+  if (howMany != 2) {
+    Serial.print("I2C receiveEvent: unexpected write length ");
+    Serial.print(howMany);
+    Serial.print(" bytes — draining (hex):");
+
+    // drain & print all available bytes in hex
+    while (Wire.available()) {
+      int b = Wire.read();
+      if (b < 0) break;
+      Serial.print(' ');
+      if ((uint8_t)b < 16) Serial.print('0');
+      Serial.print((uint8_t)b, HEX);
+    }
+    Serial.println();
+    return;               // ignore the entire write
   }
+
+  // Normal 2-byte path
   uint8_t high = Wire.read();
-  uint8_t low = Wire.read();
+  uint8_t low  = Wire.read();
   uint16_t value = (uint16_t(high) << 8) | low;
+
   lastI2CValue = value;
   Serial.print("I2C <- master wrote 0x");
   Serial.println(value, HEX);
+
   if (value & RELAY_MSB_BIT) {
     setRelays(value);
   } else {
